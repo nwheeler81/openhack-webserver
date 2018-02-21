@@ -1,4 +1,5 @@
 import os
+from functools import wraps
 from flask import Flask, request, session, g, redirect, url_for, abort, render_template, flash
 from contextlib import closing
 import datetime
@@ -8,12 +9,48 @@ from cassandra.cqlengine.models import Model
 from cassandra.cqlengine import columns
 from flask_table import Table, Col
 from cassandra.cluster import Cluster
+from cassandra.query import dict_factory
+import json
+ 
 
 # Configuration
 DATABASE=os.environ.get('CASSANDRA_HOST')
 cluster = Cluster([DATABASE])
 a1_query = 'SELECT store_id, avg(price) as avg_price, avg(raiting) as avg_rating FROM a1_ratings GROUP BY store_id'
 a2_query = 'SELECT store_id, sum(value) as total_per_store FROM a2_receipts GROUP BY store_id'
+
+
+columns_a3 = [
+  {
+    "field": "store_id", # which is the field's name of data key 
+    "title": "Store", # display as the table header's name
+    "sortable": True,
+  },
+  {
+    "field": "avg_price",
+    "title": "Average price",
+    "sortable": True,
+  },
+  {
+    "field": "avg_rating",
+    "title": "Average rating",
+    "sortable": True,
+  }
+]
+
+columns_a4 = [
+  {
+    "field": "store_id", # which is the field's name of data key 
+    "title": "Store", # display as the table header's name
+    "sortable": True,
+  },
+  {
+    "field": "total_per_store",
+    "title": "Total",
+    "sortable": True,
+  }
+]
+
 
 class receipts_by_store_id(Model):
     __keyspace__="shop_receipts"
@@ -67,8 +104,11 @@ class A2(Table):
     store_id = Col('Store')
     total_per_store = Col('Total per store')
 
+
+
 application = Flask(__name__)
 application.config.from_object(__name__)
+
 
 def connect_db(__keyspace__):
     """Connects to the specific database."""
@@ -94,7 +134,7 @@ def get_receipts():
 
 @application.route('/')
 def index():
-    return render_template('home.html')
+    return render_template('base.html')
 
 @application.route('/ratings')
 def ratings():
@@ -120,6 +160,38 @@ def a2():
     table = A2(entries)
     return table.__html__()
 
+def get_a3():
+    data = []
+    session = cluster.connect('shop_raitings')
+    session.row_factory = dict_factory
+    rows = session.execute(a1_query)
+    for row in rows:
+        data.append(row)
+    return data 
+  
+@application.route('/analytical_dashboards/ratings')
+def a3():
+    return render_template("table.html",
+      data=get_a3(),
+      columns=columns_a3,
+      title='Analytical dashboard. Average metrics price and rating by store')
+
+def get_a4():
+    data = []
+    session = cluster.connect('shop_receipts')
+    session.row_factory = dict_factory
+    rows = session.execute(a2_query)
+    for row in rows:
+        data.append(row)
+    return data
+
+@application.route('/analytical_dashboards/receipts')
+def a4():
+    return render_template("table.html",
+      data=get_a4(),
+      columns=columns_a4,
+      title='Analytical dashboard. Total sum by store')
+    
 if __name__ == "__main__":
     application.run(port=5001)
 
